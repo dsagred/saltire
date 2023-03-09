@@ -1,5 +1,8 @@
-# saltire
-High-resolution cross-correllation fitting
+# *saltire* 
+
+
+
+### <img src="saltire_icon.jpg"  width="40" height="35"> A High-resolution Cross-correlation Model
 
 *saltire* (Sebastian et al. 2022a, in prep.) is a simplistic model for high resolution cross-correlation spectroscopy (HRCCS) maps which are usually produced as by-product of atmospheric retrieval frameworks.
 
