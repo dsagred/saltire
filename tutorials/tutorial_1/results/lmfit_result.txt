@@ -1,0 +1,29 @@
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 134
+    # data points      = 775
+    # variables        = 7
+    chi-square         = 1.0891e-07
+    reduced chi-square = 1.4181e-10
+    Akaike info crit   = -17567.3177
+    Bayesian info crit = -17534.7476
+[[Variables]]
+    K:        77.2062565 +/- 0.06344170 (0.08%) (init = 77)
+    v_sys:    32.0358065 +/- 0.04818927 (0.15%) (init = 32)
+    height:   1.00000531 +/- 6.5203e-07 (0.00%) (init = 1)
+    sum_amp: -1.7182e-04 +/- 3.9799e-06 (2.32%) (init = -0.0002)
+    dif_amp: -0.48999899 +/- 0.07846691 (16.01%) (init = -0.4)
+    sigmax1:  2.74120173 +/- 0.15072378 (5.50%) (init = 2.5)
+    sigmax2:  4.69304601 +/- 0.36999245 (7.88%) (init = 8.8)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(dif_amp, sigmax1) = -0.951
+    C(dif_amp, sigmax2) = 0.946
+    C(sigmax1, sigmax2) = -0.817
+    C(sum_amp, sigmax1) = 0.476
+    C(height, sigmax2)  = -0.385
+    C(sum_amp, dif_amp) = -0.310
+    C(height, dif_amp)  = -0.227
+    C(height, sum_amp)  = -0.171
+    C(height, sigmax1)  = 0.159
+    C(sum_amp, sigmax2) = -0.130
+    C(K, v_sys)         = 0.126
