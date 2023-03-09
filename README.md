@@ -5,7 +5,7 @@ High-resolution cross-correllation fitting
 
 Furthermore, this model can also be used to derive masses of low mass stellar binaries (Sebastian et al. 2022b, in prep.).
 
-Usecases for *saltire* are:
+Use cases for *saltire* are:
 
 - Fit CCF maps to estimate the planets semi amplitude and systems restframe.
 - Quickly predict the expected 'shape' of retrieval maps depending from the planets orbit and obsering phase. 
