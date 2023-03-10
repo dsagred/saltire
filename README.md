@@ -10,8 +10,12 @@ Furthermore, this model can also be used to derive masses of low mass stellar bi
 
 Use cases for *saltire* are:
 
-- Fit CCF maps to estimate the planets semi amplitude and systems restframe.
-- Quickly predict the expected 'shape' of retrieval maps depending from the planets orbit and obsering phase. 
+- Fit CCF maps to estimate the companions semi amplitude and systems restframe.
+- Quickly predict the expected 'shape' of retrieval maps depending from the planets orbit and obsering phase.
+
+**Development**
+- The current version support weighting of observations i.e. to model a noise driven weighting usually applied during CCF map creation. This can also be used to model observations without or with minimised signal. 
+- A physical phase curve model for inferior conjunction observations will be added in future.
 
 **License**:
 
