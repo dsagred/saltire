@@ -17,7 +17,7 @@ import copy
 import logging
 import warnings
 warnings.filterwarnings('ignore')
-import radvel
+import radial_vel
 
 #--- Change LOG level ----------------------------------------------------------
 LOG_LEVEL = "warning"
@@ -76,18 +76,18 @@ def fit_residual(pars,x, y,obs,fixpar,data=None,err=None,func='Gauss'):
             #1.) comparison model with exact orbital parameters at start position
             #parm = [K, K_oth[i], theta[i], v_sys]
             parm = [K, 0., theta, v_sys]
-            rv0,_ = radvel.RV_Model(parm,obstimes,fixpar[i])
+            rv0,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i])
             #2.) Model with exact orbital parameters at explored position
             parm = [y.T[0][i],0., theta, offset]
-            rv,_ = radvel.RV_Model(parm,obstimes,fixpar[i]) 
+            rv,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i]) 
         else:
             #1.) comparison model with exact orbital parameters at start position
             #parm = [K_oth[i],K, theta[i], v_sys]
             parm = [0.,K, theta, v_sys]
-            _,rv0 = radvel.RV_Model(parm,obstimes,fixpar[i])
+            _,rv0 = radial_vel.RV_Model(parm,obstimes,fixpar[i])
             #2.) Model with exact orbital parameters at explored position
             parm = [0.,y.T[0][i], theta, offset]
-            _,rv = radvel.RV_Model(parm,obstimes,fixpar[i])
+            _,rv = radial_vel.RV_Model(parm,obstimes,fixpar[i])
 
                     
         #apply expected semi amplitude K
@@ -150,17 +150,17 @@ def lnlike(pos):#x,y,params,varnames,obs,fixpar,data=None,err=None,func='Gauss')
         if planet:
             #1.) comparison model with exact orbital parameters at start position
             parm = [K, 0., theta, v_sys]
-            rv0,_ = radvel.RV_Model(parm,obstimes,fixpar[i])
+            rv0,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i])
             #2.) Model with exact orbital parameters at explored position
             parm = [y.T[0][i],0., theta, offset]
-            rv,_ = radvel.RV_Model(parm,obstimes,fixpar[i]) 
+            rv,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i]) 
         else:
             #1.) comparison model with exact orbital parameters at start position
             parm = [0.,K, theta, v_sys]
-            _,rv0 = radvel.RV_Model(parm,obstimes,fixpar[i])
+            _,rv0 = radial_vel.RV_Model(parm,obstimes,fixpar[i])
             #2.) Model with exact orbital parameters at explored position
             parm = [0.,y.T[0][i], theta, offset]
-            _,rv = radvel.RV_Model(parm,obstimes,fixpar[i])
+            _,rv = radial_vel.RV_Model(parm,obstimes,fixpar[i])
 
                     
         #apply expected semi amplitude K
@@ -259,7 +259,6 @@ def run_MCMC(params,x,y,e_p,obs,fixpar,data,err=None,filename = "save.h5",overwr
     sampler = run_sampler(pos,nwalkers, n_var,nsteps,backend,burn=burn)    
     
     return sampler,varnames
-    
 
 def DbGaus1d(xs,mean,sum_amp,dif_amp,sigmax1,sigmax2):
     '''
@@ -300,6 +299,27 @@ def DbLor1d(xs,mean,sum_amp,dif_amp,sigmax1,sigmax2):
     model = lorx1+lorx2
     return model
 
+def rem_walkers(samples,parameter=0,sigma=1):
+    '''
+    removes walkers that are on average > sigma away from the others (
+    !! Check it's not removing a valid second solution !!
+
+    samples - emcee samples to be cleaned
+    parameter - parameter to be evaluated (My affect all params, but only one has to be selected).
+    '''
+    data = np.average(samples[:,:,:],axis=0)
+    #remove walkers that are on average > sigma away
+    val = np.median(data.T[parameter])
+    err = np.std(data.T[parameter])
+    
+    part = np.abs(data.T[parameter]-val)<=sigma*err
+    #plt.plot(np.abs(data.T[parameter]-val))
+    #plt.axhline(err)
+    #plt.show()
+    return samples[:,part,:]
+    
+### Convenient plotting functions ###
+ 
 def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-1}]', outim='_.png',savefig=True,xlim=None,vmin=None,vmax=None):
 
     '''
@@ -359,14 +379,16 @@ def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-
     plt.tight_layout()
     if savefig:
         plt.savefig(outim,dpi=300)
-    plt.show()
+    #plt.show()
     del data_plot
 
-def cutplot(data,model,velo,K_p,v_sys,K_opt,save=False,file='.png',plotting=True,xlabel1 ='v_{sys}\,[km\,s^{-1}]',xlabel2 ='K_{p}\,[km\,s^{-1}]',margin=0.1):
+def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plotting=True,xlabel1 ='v_{sys}\,[km\,s^{-1}]',xlabel2 ='K_{p}\,[km\,s^{-1}]',margin=0.1):
     '''
     Generates a cut plot through the CCF map at given coordinates (v_sys,K_opt).
-
-
+    It will always plot two cuts, ideally the two, with the coordinates being between.
+    
+    Both data and fit maps should be given.
+    plotting the data or the fit maps only is supported.
     '''
 
     #find the data (and model) values, closest to the resulting parameters
@@ -379,8 +401,17 @@ def cutplot(data,model,velo,K_p,v_sys,K_opt,save=False,file='.png',plotting=True
     fig, axs = plt.subplots(1, 2,figsize=(10,5),sharey=True)
     
     #define y scale of plot
-    min = np.min(data)
-    max = np.max(data)
+    if data is not None:
+        min = np.min(data)
+        max = np.max(data)
+    else:
+        
+        min = np.min(model)
+        max = np.max(model)
+        if (min is None) or (max is None):
+            print('Ups, no maps provided.')
+            min=0
+            max=1
     if np.sign(min) == np.sign(max):
         axs[0].set_ylim((1-margin)*min,(1+margin)*max)
         axs[1].set_ylim((1-margin)*min,(1+margin)*max)
@@ -391,13 +422,17 @@ def cutplot(data,model,velo,K_p,v_sys,K_opt,save=False,file='.png',plotting=True
     for i in ycut:
         axs[0].set_ylabel(r'$\rm '+'CCF'+'$',fontsize=14)
         axs[0].set_xlabel(r'$\rm '+xlabel1+'$',fontsize=14)
-        axs[0].plot(velo,data[i],marker='o',color='black')
-        axs[0].plot(velo,model[i],color='red',alpha=0.5)
+        if data is not None:
+            axs[0].plot(velo,data[i],marker='o',color='black')
+        if model is not None:
+            axs[0].plot(velo,model[i],color='red',alpha=0.5)
     
     for i in xcut:
         axs[1].set_xlabel(r'$\rm '+xlabel2+'$',fontsize=14)
-        axs[1].plot(K_p,data.T[i],color='black',marker='o',ls='')
-        axs[1].plot(K_p,model.T[i],color='red',alpha=0.5)
+        if data is not None:
+            axs[1].plot(K_p,data.T[i],color='black',marker='o',ls='')
+        if model is not None:
+            axs[1].plot(K_p,model.T[i],color='red',alpha=0.5)
     plt.tight_layout()
     
     if save:
@@ -406,22 +441,41 @@ def cutplot(data,model,velo,K_p,v_sys,K_opt,save=False,file='.png',plotting=True
         plt.show()
     plt.close()
 
-def rem_walkers(samples,parameter=0,sigma=1):
+def orbit_plot(obs,fixpar,K_start,T_trans=None,T_occ=None,xlim=None,save=False,file='.png',plotting=True):
     '''
-    removes walkers that are on average > sigma away from the others (
-    !! Check it's not removing a valid second solution !!
+    plot orbit that has been used in the model
+    '''
+    # Unpack obs
+    obstimes,_,planet = obs
 
-    samples - emcee samples to be cleaned
-    parameter - parameter to be evaluated (My affect all params, but only one has to be selected).
-    '''
-    data = np.average(samples[:,:,:],axis=0)
-    #remove walkers that are on average > sigma away
-    val = np.median(data.T[parameter])
-    err = np.std(data.T[parameter])
+    # Derive rv values
+    if planet:
+        par = [K_start,0.,0,0]
+        rv,_ = radial_vel.RV_Model(par,obstimes,fixpar.T[0])
+    else:
+        par = [0.,K_start,0,0]
+        _,rv = radial_vel.RV_Model(par,obstimes,fixpar.T[0])
+    if T_trans is None:
+        phases  = (obstimes-fixpar[1][0])%fixpar[0][0]/fixpar[0][0]
+    else:
+        phases  = (obstimes-T_trans)%fixpar[0][0]/fixpar[0][0]
+
+    fig, ax = plt.subplots(figsize=(8,6))
+    plt.plot(phases,rv,marker='o',ls='')
+    if T_occ is not None:
+        plt.axvline((T_occ-fixpar[1][0])%fixpar[0][0]/fixpar[0][0])
+    ax.set_ylabel( r'$\rm '+'RV_{Planet}\,[km\,s^{-1}]'+'$',fontsize=14)
+    ax.set_xlabel('Orbital Phase [d]',fontsize=14)
+    if xlim is None:
+        ax.set_xlim(0,1)
+    else:
+        ax.set_xlim(xlim)
+    plt.tight_layout()
     
-    part = np.abs(data.T[parameter]-val)<=sigma*err
-    #plt.plot(np.abs(data.T[parameter]-val))
-    #plt.axhline(err)
-    #plt.show()
-    return samples[:,part,:]
-    
+    if save:
+        plt.savefig(file,dpi=300)
+    if plotting:
+        plt.show()
+    plt.close()
+
+
