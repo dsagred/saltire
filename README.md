@@ -14,12 +14,16 @@ Use cases for *saltire* are:
 - Predict the expected 'shape' of retrieval maps depending from the planets orbit and observed phases.
 
 **Installation**:
-Download the whole archive using git clone.
+Download the whole archive using 'git clone https://github.com/dsagred/saltire.git'.
+
+### Dependencies:
+- numpy, astropy, 
+- For fitting: lmfit, emcee, multiprocessing
 
 
 **Development**:
 - The current version supports weighting of observations i.e. to model a noise driven weighting usually applied during CCF map creation. This can also be used to model observations without or with minimised signal. 
-- A physical phase curve model for inferior conjunction observations will be added in future.
+- An option to add a time dependent CCF contrast will be added in future.
 
 **License**:
 
