@@ -28,7 +28,7 @@ logger = logging.getLogger() # root logger, common for all
 logger.setLevel(logging.getLevelName(LOG_LEVEL.upper()))
 ################################################################################
 
-"""Bla bla"""
+
 
 def saltirise(params,velo,K_p,obs,fixpar,data,err=None,method='leastsq',func='Gauss',plus=False):
     '''
