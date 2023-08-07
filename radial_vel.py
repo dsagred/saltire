@@ -13,24 +13,36 @@ AU = constants.au.value
 Me = constants.M_earth.value
 angle_conv = np.pi/180/3600/365.25 #arcsecs/yr -> rad/day
 
-def RV_Model(par,times,fixpar): 
+def RV_Model(par,times,fixpar,plus=False): 
 
     '''
     K - semi amplitude of the planet
     Ks- semi amplitude of the star
     omega - argument of peristron in radian
     T_0 - Time of periastron
+    plus: False, if True is uses RV_model_plus function to include precession: fixpar needs to include: omegadot M0, & M1 values.
 
     '''
 # Using flux-weighted=False so exact value radius_1, radius_2, sbratio not important
-    K, Ks, theta, offset = par
-    period,T_0,ecc,omega = fixpar
+    Kp, Ks, theta, offset = par
+    if plus:
+        try:
+            period,T0p,ecc,omega,omegadot,M0,M1 = fixpar
+        except:
+            print('Please provide primary mass estimate in fixpar [period,T_0,ecc,omega,omegadot,M0,M1].')
+    else:
+        period,T0p,ecc,omega = fixpar
     
     #add phase shift theta
-    T_0 = T_0 + theta*period
+    T0p = T0p + theta*period
     
-    model = keplerian(times, period, K, ecc, omega-np.pi, T_0, offset)
-    star  = keplerian(times, period, Ks, ecc, omega, T_0, offset)
+    if plus:
+        model = keplerian_plusplus(times, period, Kp, ecc, omega-pi,omegadot, T0p, offset,M0=M0,R0=0,M1=M1,relativistic_correction=True,tidal_correction=False)
+        star  = keplerian_plusplus(times, period, Ks, ecc, omega, omegadot, T0p, offset,M0=M0,R0=0,M1=M1,relativistic_correction=True,tidal_correction=False)
+
+    else:
+        model = keplerian(times, period, Kp, ecc, omega-pi, T0p, offset)
+        star  = keplerian(times, period, Ks, ecc, omega, T0p, offset)
 
     return model,star
 
@@ -47,12 +59,15 @@ def RV_Model_plusplus(par,times,fixpar):
     '''
 # Using flux-weighted=False so exact value radius_1, radius_2, sbratio not important
     K, Ks, theta, offset = par
-    period,T_0,ecc,omega,omegadot,M0,M1 = fixpar
-    
+    try:
+        period,T_0,ecc,omega,omegadot,M0,M1 = fixpar
+    except:
+        print('Please provide primary mass estimate in fixpar [period,T_0,ecc,omega,omegadot,M0,M1].')
+
     #add phase shift theta
     T_0 = T_0 + theta*period
     
-    model = keplerian_plusplus(times, period, K, ecc, omega-np.pi,omegadot-np.pi, T_0, offset,M0=M0,R0=0,M1=M1,relativistic_correction=True,tidal_correction=False)
+    model = keplerian_plusplus(times, period, K, ecc, omega-np.pi,omegadot, T_0, offset,M0=M0,R0=0,M1=M1,relativistic_correction=True,tidal_correction=False)
     star  = keplerian_plusplus(times, period, Ks, ecc, omega, omegadot, T_0, offset,M0=M0,R0=0,M1=M1,relativistic_correction=True,tidal_correction=False)
 
     return model,star
@@ -81,7 +96,7 @@ def keplerian(time, p, k, ecc, omega, t0, vsys):
 
     with np.errstate(divide='raise'):
         for i in range(p.size):
-            M = 2.*pi * (time-t0[i]) / p[i]
+            M = 2.*np.pi * (time-t0[i]) / p[i]
             E = ecc_anomaly(M, ecc[i])
             nu = true_anomaly(E, ecc[i])
             vel += k[i] * (np.cos(omega[i]+nu)+ ecc[i]*np.cos(omega[i]))
@@ -95,23 +110,19 @@ def true_anomaly(E, e):
     return 2. * np.arctan( np.sqrt((1.+e)/(1.-e)) * np.tan(E/2.))
 
 def ecc_anomaly(M, e):
-    '''
-    calculate the eccentric anomaly from the mean anomaly
-    '''
     M = np.atleast_1d(M)
-    E0 = M; E = M
-    for _ in range(200):
-        g = E0 - e * np.sin(E0) - M
-        gp = 1.0 - e * np.cos(E0)
-        E = E0 - g / gp
-
-        # check for convergence
-        if (np.linalg.norm(E - E0, ord=1) <= 1.234e-10): 
-            return E
-        # keep going
-        E0 = E
-
-    # no convergence, return the best estimate
+    E=M			#startvalues
+    E_n=M		#startvalues
+    i = 0
+    while 1==1:
+        i+=1 
+        E_n = E
+        E = E_n - (E_n-e*np.sin(E_n)-M)/(1.-e*np.cos(E_n))
+        if max(abs(E*180/np.pi-E_n*180/np.pi))<=1E-7:
+            break
+        if i ==200:
+            # no convergence, return the best estimate
+            break
     return E
 
 def keplerian_plus(time, p, k, ecc, omega, omdot, t0, vsys):
@@ -140,7 +151,7 @@ def keplerian_plus(time, p, k, ecc, omega, omdot, t0, vsys):
             vel += k[i] * (np.cos(nu+w) + ecc[i]*np.cos(w))
         vel += vsys 
         
-def keplerian_plusplus(time, p, k, ecc, omega, omdot, t0, vsys, M0, R0, M1, relativistic_correction=True, tidal_correction=True):
+def keplerian_plusplus(time, p, k, ecc, omega, omdot, t0, vsys, M0, R0, M1=None, relativistic_correction=True, tidal_correction=True):
     '''
     RV keplerian function with a linear apsidal precession term added and the option to include relativistic and tidal corrections, given:
         time: array of times

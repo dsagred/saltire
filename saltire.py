@@ -12,6 +12,8 @@ from matplotlib.ticker import FormatStrFormatter
 import os
 import sys
 import copy
+from scipy.interpolate import griddata
+from scipy.interpolate import CubicSpline
 #import astropy.units as u
 #from numpy.polynomial import Polynomial as polyn
 import logging
@@ -26,11 +28,11 @@ logger = logging.getLogger() # root logger, common for all
 logger.setLevel(logging.getLevelName(LOG_LEVEL.upper()))
 ################################################################################
 
-def saltirise(params,velo,K_p,obs,fixpar,data,err=None,method='leastsq',func='Gauss'):
+def saltirise(params,velo,K_p,obs,fixpar,data,err=None,method='leastsq',func='Gauss',plus=False):
     '''
     Saltirise your data!
 
-    This fuction will prefom an lmfit fitting to your CCF map to obtain first parameters (default: least squares).
+    This fuction will perfom an lmfit fitting to your CCF map to obtain first parameters (default: least squares).
     
     params: lmfit parameter file, specifying: K,v_sys,height,sum_amp,dif_amp,sigmax1,sigmax2
     x,y: np.meshgrid(v_sys,K_p) - explored systemic velocity and semi amplitude.
@@ -38,26 +40,27 @@ def saltirise(params,velo,K_p,obs,fixpar,data,err=None,method='leastsq',func='Ga
     fixpar: np.array([period,T0,ecc,omega]) - orbital parameters (each parameters has to be an array od len(K_p))
     data: 2d CCF map
     err: (optional) error of map data
+    plus: False, if True is uses RV_model_plus function to include precession: fixpar needs to include: omegadot M0, & M1 values.
 
     '''
     x,y = np.meshgrid(velo,K_p)
     #build dictionary of parameters
     if err is None:
-        kws={'obs': obs,'fixpar':fixpar.T,'data':data,'func':func}#,'err':err_data}
+        kws={'obs': obs,'fixpar':fixpar.T,'data':data,'func':func,'plus':plus}#,'err':err_data}
     else:
-        kws={'obs': obs,'fixpar':fixpar.T,'data':data,'err':err,'func':func}
+        kws={'obs': obs,'fixpar':fixpar.T,'data':data,'err':err,'func':func,'plus':plus}
 
     return lmfit.minimize(fit_residual, params=params, args=(x,y),kws=kws, method=method)    
 
-def fit_residual(pars,x, y,obs,fixpar,data=None,err=None,func='Gauss'):
+def fit_residual(pars,x, y,obs,fixpar,data=None,err=None,func='Gauss',plus=False):
 
     #fixpar = [period,T_0,ecc,omega]
     # unpack parameters: extract .value attribute for each parameter
     
     parvals = pars.valuesdict()
-    v_sys = parvals['v_sys']
-    K = parvals['K']
-    height = parvals['height']
+    v_sys   = parvals['v_sys']
+    K_pl    = parvals['K']
+    height  = parvals['height']
     sum_amp = parvals['sum_amp']
     dif_amp = parvals['dif_amp']
     sigmax1 = parvals['sigmax1']
@@ -75,19 +78,23 @@ def fit_residual(pars,x, y,obs,fixpar,data=None,err=None,func='Gauss'):
         if planet:
             #1.) comparison model with exact orbital parameters at start position
             #parm = [K, K_oth[i], theta[i], v_sys]
-            parm = [K, 0., theta, v_sys]
-            rv0,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i])
+            parm = [K_pl, 0., theta, v_sys]
+            #rv0,_ = tools.Planet_rv(parm,obstimes,fixpar[i])
+            rv0,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i],plus=plus)
             #2.) Model with exact orbital parameters at explored position
             parm = [y.T[0][i],0., theta, offset]
-            rv,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i]) 
+            #rv,_ = tools.Planet_rv(parm,obstimes,fixpar[i])
+            rv,_ = radial_vel.RV_Model(parm,obstimes,fixpar[i],plus=plus) 
         else:
             #1.) comparison model with exact orbital parameters at start position
             #parm = [K_oth[i],K, theta[i], v_sys]
-            parm = [0.,K, theta, v_sys]
-            _,rv0 = radial_vel.RV_Model(parm,obstimes,fixpar[i])
+            parm = [0.,K_pl, theta, v_sys]
+            #_,rv0 = tools.Planet_rv(parm,obstimes,fixpar[i])
+            _,rv0 = radial_vel.RV_Model(parm,obstimes,fixpar[i],plus=plus)
             #2.) Model with exact orbital parameters at explored position
             parm = [0.,y.T[0][i], theta, offset]
-            _,rv = radial_vel.RV_Model(parm,obstimes,fixpar[i])
+            #_,rv = tools.Planet_rv(parm,obstimes,fixpar[i])
+            _,rv = radial_vel.RV_Model(parm,obstimes,fixpar[i],plus=plus)
 
                     
         #apply expected semi amplitude K
@@ -97,9 +104,15 @@ def fit_residual(pars,x, y,obs,fixpar,data=None,err=None,func='Gauss'):
         if func=='Lorentz':
             model[i] = height + np.average(DbLor1d(xs,mean=rv,sum_amp=sum_amp,dif_amp=dif_amp,
                                         sigmax1=sigmax1,sigmax2=sigmax2),weights=weigths,axis=0)
-        else:
+        elif func=='Gauss':
             model[i] = height + np.average(DbGaus1d(xs,mean=rv,sum_amp=sum_amp,dif_amp=dif_amp,
                                         sigmax1=sigmax1,sigmax2=sigmax2),weights=weigths,axis=0)
+        else:
+            #try if an array for a function is given
+            if isinstance(func, np.ndarray):
+                model[i] = height + np.average(shape_func(xs,mean=rv,ccf_shape=func),weights=weigths,axis=0)
+            else:
+                print('Error, please specify a numpy array for the CCF shape or a supported function')
     
     if data is None:
         return model.flatten()
@@ -299,6 +312,30 @@ def DbLor1d(xs,mean,sum_amp,dif_amp,sigmax1,sigmax2):
     model = lorx1+lorx2
     return model
 
+def shape_func(xs,mean,ccf_shape):
+    '''
+    create a functional form of the CCF
+    '''
+
+    #add a large area without information to allow sline interpolation bejond the borders
+    velo = ccf_shape[0]
+    flux = ccf_shape[1]
+    help2 = velo[0]
+    help3 = velo[-1]
+    help4 = np.median(np.diff(velo))
+    starth = help2*help4*4
+    endh = help3*help4*4
+    velo_help = np.linspace(starth,endh,int((endh-starth)/help4)+1)
+    #print(velo_help)
+    shape_help=np.ones(len(velo_help))
+    shape_help[np.isin(velo_help,velo)]=flux
+
+    #do a spline interpolation
+    c = CubicSpline(velo_help, shape_help)
+    #derive shifted function 
+    c_move = c(xs-mean)
+    return c_move
+
 def rem_walkers(samples,parameter=0,sigma=1):
     '''
     removes walkers that are on average > sigma away from the others (
@@ -320,23 +357,42 @@ def rem_walkers(samples,parameter=0,sigma=1):
     
 ### Convenient plotting functions ###
  
-def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-1}]', outim='_.png',savefig=True,xlim=None,vmin=None,vmax=None):
+def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-1}]',bar_label='CCF', outim='_.png',savefig=True,xlim=None,vmin=None,vmax=None,lin_cor=False):
 
     '''
     Plots 2D data with right axis labels.
     Data need to be equstitant sampled (Gaps are not properly displayed).
     xlim: tuple with starting and end value in units of x.
+    lin_cor: data are interpolated e.g. to compensate for gaps
     '''
+
+    data_plot = copy.deepcopy(data)
+
+    if lin_cor:
+        
+        #velo = ns[0][0][0][0]
+        #K_p = par_0[0][np.argsort(par_0[0])]
+        grid_org_x,grid_org_y=np.meshgrid(x,y)
+        points = np.vstack([grid_org_x.flatten(),grid_org_y.flatten()]).T
+
+        #values = plotting[0].flatten()#.shape
+        # define grid.
+        xi = np.linspace(x[0],x[-1],len(x))
+        yi = np.linspace(y[0],y[-1],len(y))
+        grid_x, grid_y = np.meshgrid(xi,yi)
+
+        # grid the data.
+        data_plot = griddata(points, data_plot.flatten(), (grid_x,grid_y), method='linear')
 
     y_values_full = y
 
     if xlim!=None:
         x_part = [(x>=xlim[0]) & (x<=xlim[1])]
         x_values_full = x[x_part]
-        data_plot=(data.T[x_part]).T
+        data_plot=(data_plot.T[x_part]).T
     else:
         x_values_full = x
-        data_plot = copy.deepcopy(data)
+        #data_plot = copy.deepcopy(data)
     
     fig, ax = plt.subplots(figsize=(8,6))
 
@@ -359,6 +415,15 @@ def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-
     x_values = ["%.1f" % x for x in x_values]
     x_positions = np.linspace(0,len(x_values_full)-1,len(x_values))
 
+
+    
+        #err_bin      = griddata(points, err[0].flatten(), (grid_x,grid_y), method='linear')
+        #zi = griddata((x, y), z, (xi[None, :], yi[:, None]), method='linear')
+
+        #[grid_org_x,grid_org_y]
+        #print(points.shape,len(values))
+        #zi.shape
+
     #y_smooth =polyn.fit(y_values_full,np.arange(len(y_values_full)),2)
     #y_smooth2=polyn.fit(np.arange(len(y_values_full)),y_values_full,2)
 
@@ -375,14 +440,16 @@ def plot_axis2D(x,y,data,xlabel='v_{sys}\,[km\,s^{-1}]',ylabel='K_{P}\,[km\,s^{-
     else:
         plt.imshow(data_plot,cmap='Blues',aspect='auto',origin='lower',alpha=1,vmin=vmin,vmax=vmax)
 
-    plt.colorbar()
+    cbar = plt.colorbar()
+    cbar.set_label(r'$\rm '+bar_label+'$',fontsize=14)
+    #plt.colorbar(label=())
     plt.tight_layout()
     if savefig:
         plt.savefig(outim,dpi=300)
-    #plt.show()
+    plt.show()
     del data_plot
 
-def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plotting=True,xlabel1 ='v_{sys}\,[km\,s^{-1}]',xlabel2 ='K_{p}\,[km\,s^{-1}]',margin=0.1):
+def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plotting=True,xlabel1 ='v_{sys}\,[km\,s^{-1}]',xlabel2 ='K_{p}\,[km\,s^{-1}]',margin=0.1,bar_label='CCF'):
     '''
     Generates a cut plot through the CCF map at given coordinates (v_sys,K_opt).
     It will always plot two cuts, ideally the two, with the coordinates being between.
@@ -420,10 +487,11 @@ def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plo
         axs[1].set_ylim((1+margin)*min,(1+margin)*max)
     
     for i in ycut:
-        axs[0].set_ylabel(r'$\rm '+'CCF'+'$',fontsize=14)
+        axs[0].set_ylabel(r'$\rm '+bar_label+'$',fontsize=14)
         axs[0].set_xlabel(r'$\rm '+xlabel1+'$',fontsize=14)
         if data is not None:
             axs[0].plot(velo,data[i],marker='o',color='black')
+
         if model is not None:
             axs[0].plot(velo,model[i],color='red',alpha=0.5)
     
@@ -433,6 +501,7 @@ def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plo
             axs[1].plot(K_p,data.T[i],color='black',marker='o',ls='')
         if model is not None:
             axs[1].plot(K_p,model.T[i],color='red',alpha=0.5)
+            
     plt.tight_layout()
     
     if save:
@@ -441,9 +510,20 @@ def cutplot(velo,K_p,v_sys,K_opt,data=None,model=None,save=False,file='.png',plo
         plt.show()
     plt.close()
 
-def orbit_plot(obs,fixpar,K_start,T_trans=None,T_occ=None,xlim=None,save=False,file='.png',plotting=True):
+def orbit_plot(obs,fixpar,K_start,T_trans=None,T_occ=None,xlim=None,ylim=None,save=False,file='.png',plotting=True):
     '''
     plot orbit that has been used in the model
+    obs: array, containing obstimes, weights and planet, using in 'saltirise' function.
+    fixpar: orbit parameters
+    K_start: semi amplitude of planet orbit
+    T_trans: ephemerids of transit
+    T_occ: ephemeris of eclipse
+    xlim: phase coverage to be plotted, if not specified it is (0,1) 
+    ylim: K-Velocity range plotted.
+    save: boolean, wheter a file has to be saved.
+    file: save file location
+    plotting: boolean, whter a plot should be generated.
+
     '''
     # Unpack obs
     obstimes,_,planet = obs
@@ -466,10 +546,15 @@ def orbit_plot(obs,fixpar,K_start,T_trans=None,T_occ=None,xlim=None,save=False,f
         plt.axvline((T_occ-fixpar[1][0])%fixpar[0][0]/fixpar[0][0])
     ax.set_ylabel( r'$\rm '+'RV_{Planet}\,[km\,s^{-1}]'+'$',fontsize=14)
     ax.set_xlabel('Orbital Phase [d]',fontsize=14)
-    if xlim is None:
-        ax.set_xlim(0,1)
-    else:
+    #set borders
+    if xlim is not None:
         ax.set_xlim(xlim)
+    else:
+        ax.set_xlim(0,1)
+        
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
     plt.tight_layout()
     
     if save:
