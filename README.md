@@ -16,7 +16,7 @@ Use cases for *saltire* are:
 **Installation**:
 Download the whole archive using 'git clone https://github.com/dsagred/saltire.git'.
 
-### Dependencies:
+Dependencies:
 - numpy, astropy, 
 - For fitting: lmfit, emcee, multiprocessing
 
