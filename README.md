@@ -10,7 +10,7 @@ This model can also be used to derive dynamical masses of high-contrast binaries
 Use cases for *saltire* are:
 
 - Fit CCF maps to estimate the companions semi amplitude and systems restframe.
-- Predict the expected 'shape' of retrieval maps depending from the planets orbit and observed phases.
+- Predict the expected 'shape' of CCF maps depending from the planets orbit and observed phases.
 
 **Installation**:
 Download the whole archive using 'git clone https://github.com/dsagred/saltire.git'.
